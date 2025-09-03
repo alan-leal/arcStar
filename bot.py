@@ -61,7 +61,7 @@ async def pause(interaction: discord.Interaction):
     # Check if something is actually playing
     if not voice_client.is_playing():
         return await interaction.response.send_message("Nothing is currently playing.")
-    
+
     # Pause the track
     voice_client.pause()
     await interaction.response.send_message("Playback paused!")
@@ -78,7 +78,7 @@ async def resume(interaction: discord.Interaction):
     # Check if it's actually paused
     if not voice_client.is_paused():
         return await interaction.response.send_message("I’m not paused right now.")
-    
+
     # Resume playback
     voice_client.resume()
     await interaction.response.send_message("Playback resumed!")
@@ -126,17 +126,25 @@ async def play(interaction: discord.Interaction, song_query: str):
         await voice_client.move_to(voice_channel)
 
     ydl_options = {
-        "format": "bestaudio[abr<=96]/bestaudio",
-        "noplaylist": True,
-        "youtube_include_dash_manifest": False,
-        "youtube_include_hls_manifest": False,
+        'format': 'bestaudio/best',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'noplaylist': True,
+        'youtube_include_dash_manifest': False,
+        'youtube_include_hls_manifest': False,
+        '--no-check-certificate': True,
+        'cookies': 'cookies.txt', # Add a cookies file
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
     query = "ytsearch1: " + song_query
     results = await search_ytdlp_async(query, ydl_options)
     tracks = results.get("entries", [])
 
-    if tracks is None:
+    if not tracks:
         await interaction.followup.send("No results found.")
         return
 
@@ -153,32 +161,35 @@ async def play(interaction: discord.Interaction, song_query: str):
     if voice_client.is_playing() or voice_client.is_paused():
         await interaction.followup.send(f"Added to queue: **{title}**")
     else:
-        await interaction.followup.send(f"Now playing: **{title}**")
         await play_next_song(voice_client, guild_id, interaction.channel)
+        await interaction.followup.send(f"Now playing: **{title}**")
 
 
 async def play_next_song(voice_client, guild_id, channel):
-    if SONG_QUEUES[guild_id]:
+    if SONG_QUEUES.get(guild_id):
         audio_url, title = SONG_QUEUES[guild_id].popleft()
 
         ffmpeg_options = {
             "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-            "options": "-vn -c:a libopus -b:a 96k",
-            # Remove executable if FFmpeg is in PATH
+            "options": "-vn -b:a 128k",
         }
 
-        source = discord.FFmpegOpusAudio(audio_url, **ffmpeg_options, executable="bin\\ffmpeg\\ffmpeg.exe")
+        source = discord.FFmpegOpusAudio(audio_url, **ffmpeg_options)
 
         def after_play(error):
             if error:
                 print(f"Error playing {title}: {error}")
-            asyncio.run_coroutine_threadsafe(play_next_song(voice_client, guild_id, channel), bot.loop)
+            coro = play_next_song(voice_client, guild_id, channel)
+            fut = asyncio.run_coroutine_threadsafe(coro, bot.loop)
+            try:
+                fut.result()
+            except Exception as e:
+                print(f"Error in after_play: {e}")
 
         voice_client.play(source, after=after_play)
-        asyncio.create_task(channel.send(f"Now playing: **{title}**"))
+        await channel.send(f"Now playing: **{title}**")
     else:
         await voice_client.disconnect()
-        SONG_QUEUES[guild_id] = deque()
 
 
 # Run the bot
