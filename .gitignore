@@ -1,3 +1,4 @@
 .env
 __pycache__/
 dc_env/
+cookies.txt
