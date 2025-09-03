@@ -12,6 +12,7 @@ from keep_alive import keep_alive
 # Environment variables for tokens and other sensitive data
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
+USER_AGENT = os.getenv("USER_AGENT") # For storing your browser's User-Agent
 
 keep_alive()
 
@@ -124,33 +125,48 @@ async def play(interaction: discord.Interaction, song_query: str):
         voice_client = await voice_channel.connect()
     elif voice_channel != voice_client.channel:
         await voice_client.move_to(voice_channel)
+    
+    # Check for the User-Agent in environment variables
+    if not USER_AGENT:
+        await interaction.followup.send("Bot is not properly configured. Missing User-Agent.")
+        return
 
     ydl_options = {
         'format': 'bestaudio/best',
+        'noplaylist': True,
+        'cookiefile': 'cookies.txt', # Using cookiefile option for clarity
+        'user_agent': USER_AGENT,
+        'youtube_include_dash_manifest': False,
+        'youtube_include_hls_manifest': False,
+        '--no-check-certificate': True,
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'noplaylist': True,
-        'youtube_include_dash_manifest': False,
-        'youtube_include_hls_manifest': False,
-        '--no-check-certificate': True,
-        'cookies': 'cookies.txt', # Add a cookies file
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
 
-    query = "ytsearch1: " + song_query
-    results = await search_ytdlp_async(query, ydl_options)
-    tracks = results.get("entries", [])
+    query = "ytsearch1:" + song_query
+    
+    try:
+        results = await search_ytdlp_async(query, ydl_options)
+        tracks = results.get("entries", [])
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred while searching: {e}")
+        return
+
 
     if not tracks:
         await interaction.followup.send("No results found.")
         return
 
     first_track = tracks[0]
-    audio_url = first_track["url"]
+    audio_url = first_track.get("url")
     title = first_track.get("title", "Untitled")
+
+    if not audio_url:
+        await interaction.followup.send("Could not retrieve audio URL.")
+        return
 
     guild_id = str(interaction.guild_id)
     if SONG_QUEUES.get(guild_id) is None:
